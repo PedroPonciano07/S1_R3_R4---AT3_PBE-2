@@ -1,27 +1,30 @@
 import axios from "axios";
 import Cliente from "../models/Cliente.js";
-import Endereco from "../models/Endereco.js";
 import Telefone from "../models/Telefone.js";
+import Endereco from "../models/Endereco.js";
 import clienteRepository from "../repositories/clienteRepository.js";
 
 const clienteController = {
 
-   
     criar: async (req, res) => {
         try {
-            const { nome, cpf, telefone, cep, numero, complemento } = req.body;
+            const { nome, cpf, cep, numero, telefones, complemento } = req.body;
 
+            // valida CEP
             const cepRegex = /^[0-9]{8}$/;
             if (!cepRegex.test(cep)) {
-                return res.status(400).json({ message: 'verifique o cep informado' });
+                return res.status(400).json({ message: 'Verifique o CEP informado' });
             }
 
-            const respApi = await axios.get(`http://viacep.com.br/ws/${cep}/json/`);
+            // busca ViaCEP
+            const response = await axios.get(`https://viacep.com.br/ws/${cep}/json/`);
+            const viaCep = response.data;
 
-            if (respApi.data.erro) {
-                return res.status(400).json({ message: 'CEP não encontrado' });
+            if (viaCep.erro) {
+                return res.status(400).json({ message: "CEP não encontrado" });
             }
 
+            // CLIENTE
             const cliente = new Cliente(nome, cpf);
 
             if (!cliente.validarNome()) {
@@ -32,65 +35,77 @@ const clienteController = {
                 return res.status(400).json({ message: "CPF inválido" });
             }
 
+            // TELEFONES (aceita array ou único)
+            let listaTelefones = [];
+
+            if (Array.isArray(telefones)) {
+                listaTelefones = telefones.map(t => {
+                    const tel = new Telefone(t);
+                    if (!tel.validarTelefone()) {
+                        throw new Error("Telefone inválido");
+                    }
+                    return { telefone: tel.numero };
+                });
+            } else if (telefones) {
+                const tel = new Telefone(telefones);
+                if (!tel.validarTelefone()) {
+                    return res.status(400).json({ message: "Telefone inválido" });
+                }
+                listaTelefones.push({ telefone: tel.numero });
+            }
+
+            // ENDEREÇO
             const endereco = new Endereco(
                 cep,
-                respApi.data.logradouro,
+                viaCep.logradouro,
                 numero,
-                complemento,
-                respApi.data.bairro,
-                respApi.data.localidade,
-                respApi.data.uf
+                complemento ?? null,
+                viaCep.bairro,
+                viaCep.localidade,
+                viaCep.uf
             );
 
             if (!endereco.validarCep()) {
                 return res.status(400).json({ message: "CEP inválido" });
             }
 
-            const tel = new Telefone(telefone);
-
-            if (!tel.validarTelefone()) {
-                return res.status(400).json({ message: "Telefone inválido" });
-            }
-
-            const resultado = await clienteRepository.create(
+            // SALVAR
+            const result = await clienteRepository.criar(
                 cliente,
-                endereco,
-                tel
+                listaTelefones,
+                endereco
             );
 
             res.status(201).json({
                 message: "Cliente criado com sucesso",
-                data: resultado
+                data: result
             });
 
         } catch (error) {
-            console.error(error);
+            console.log(error);
             res.status(500).json({
-                message: 'Erro no servidor',
-                errorMessage: error.message
+                message: "Erro no servidor",
+                error: error.message
             });
         }
     },
 
-    
-    listar: async (req, res) => {
+    selecionar: async (req, res) => {
         try {
             const { id } = req.params;
 
-            
             if (id) {
-                const cliente = await clienteRepository.findById(id);
+                const result = await clienteRepository.selecionarPorId(id);
 
-                if (!cliente) {
+                if (!result || result.length === 0) {
                     return res.status(404).json({ message: "Cliente não encontrado" });
                 }
 
-                return res.status(200).json(cliente);
+                return res.status(200).json(result);
             }
 
-            
-            const clientes = await clienteRepository.findAll();
-            res.status(200).json(clientes);
+            const result = await clienteRepository.selecionarTodos();
+            res.status(200).json(result);
 
         } catch (error) {
             res.status(500).json({
@@ -100,19 +115,27 @@ const clienteController = {
         }
     },
 
-  
     editar: async (req, res) => {
         try {
-            const { id } = req.params;
-            const { nome, cpf } = req.body;
+            const id = req.params.id;
+            const { nome, cpf, cep, numero, telefones, complemento } = req.body;
 
-            const clienteExistente = await clienteRepository.findById(id);
-
-            if (!clienteExistente) {
-                return res.status(404).json({ message: "Cliente não encontrado" });
+            // valida CEP
+            const cepRegex = /^[0-9]{8}$/;
+            if (!cepRegex.test(cep)) {
+                return res.status(400).json({ message: 'CEP inválido' });
             }
 
+            const response = await axios.get(`https://viacep.com.br/ws/${cep}/json/`);
+            const viaCep = response.data;
+
+            if (viaCep.erro) {
+                return res.status(400).json({ message: "CEP não encontrado" });
+            }
+
+            // CLIENTE
             const cliente = new Cliente(nome, cpf);
+            cliente.id = id; // importante pro repository
 
             if (!cliente.validarNome()) {
                 return res.status(400).json({ message: "Nome inválido" });
@@ -122,13 +145,40 @@ const clienteController = {
                 return res.status(400).json({ message: "CPF inválido" });
             }
 
-            await clienteRepository.update(id, cliente);
+            // TELEFONES
+            let listaTelefones = [];
 
-            res.status(200).json({
-                message: "Cliente atualizado com sucesso"
-            });
+            if (Array.isArray(telefones)) {
+                listaTelefones = telefones.map(t => {
+                    const tel = new Telefone(t);
+                    if (!tel.validarTelefone()) {
+                        throw new Error("Telefone inválido");
+                    }
+                    return { telefone: tel.numero };
+                });
+            }
+
+            // ENDEREÇO
+            const endereco = new Endereco(
+                cep,
+                viaCep.logradouro,
+                numero,
+                complemento ?? null,
+                viaCep.bairro,
+                viaCep.localidade,
+                viaCep.uf
+            );
+
+            const result = await clienteRepository.editar(
+                cliente,
+                listaTelefones,
+                endereco
+            );
+
+            res.status(200).json(result);
 
         } catch (error) {
+            console.log(error);
             res.status(500).json({
                 message: "Erro ao atualizar cliente",
                 error: error.message
@@ -136,46 +186,22 @@ const clienteController = {
         }
     },
 
-
     deletar: async (req, res) => {
         try {
-            const { id } = req.params;
+            const id = req.params.id;
 
-            const clienteExistente = await clienteRepository.findById(id);
+            const result = await clienteRepository.deletar(id);
 
-            if (!clienteExistente) {
-                return res.status(404).json({ message: "Cliente não encontrado" });
-            }
-
-            await clienteRepository.delete(id);
-
-            res.status(200).json({
-                message: "Cliente deletado com sucesso"
-            });
+            res.status(200).json(result);
 
         } catch (error) {
+            console.log(error);
             res.status(500).json({
                 message: "Erro ao deletar cliente",
                 error: error.message
             });
         }
     }
-
 };
 
 export default clienteController;
-
-async function consultaCep(cep) {
-    try {
-        const respApi = await axios.get(`https://viacep.com.br/ws/${cep}/json/`);
-
-        if(respApi.data.erro){
-            throw new Error('CEP não encontrado');
-        }
-
-        return respApi.data;
-    } catch (error) {
-        console.error(error)
-        throw new Error('Erro ao buscar CEP', error.message);
-    }
-}
