@@ -82,8 +82,8 @@ const clienteRepository = {
         const [rows] = await connection.execute(`
             SELECT c.*, t.telefone, e.*
             FROM clientes c
-            LEFT JOIN telefones t ON c.idCliente = t.idCliente
-            LEFT JOIN enderecos e ON c.idCliente = e.idCliente
+            INNER JOIN telefones t ON c.idCliente = t.idCliente
+            INNER JOIN enderecos e ON c.idCliente = e.idCliente
         `);
 
         // Retorna os dados
@@ -100,8 +100,8 @@ const clienteRepository = {
         const [rows] = await connection.execute(
             `SELECT c.*, t.telefone, e.*
              FROM clientes c
-             LEFT JOIN telefones t ON c.idCliente = t.idCliente
-             LEFT JOIN enderecos e ON c.idCliente = e.idCliente
+             INNER JOIN telefones t ON c.idCliente = t.idCliente
+             INEER JOIN enderecos e ON c.idCliente = e.idCliente
              WHERE c.idCliente = ?`,
             [id]
         );
@@ -217,4 +217,4 @@ const clienteRepository = {
 }
 
 // Exporta o repository
-export default clienteRepository;
+export default clienteRepository;   
